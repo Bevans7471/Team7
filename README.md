@@ -1,5 +1,4 @@
 # Team 7 - Photon Laser Tag System
-Sprint 3 Project  
 University of Arkansas - CSCE 36103 (Operating Systems / Software Engineering)
 
 ## Overview
