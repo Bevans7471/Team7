@@ -1,10 +1,11 @@
 # Team 7 - Photon Laser Tag System
 University of Arkansas - CSCE 36103 (Operating Systems / Software Engineering)
 
-Names & Github Usernames
-Brodie Baugh - brodiebaugh
-Javier Soler - Javitoo27
-Brigham Evans - Bevans7471
+| Name | Github Username |
+|------|--------------|
+|`Brodie Baugh` | brodiebaugh |
+|`Javier Soler` | Javitoo27 |
+|`Brigham Evans` | Bevans7471 |
 
 ## Overview
 This project simulates a laser tag player entry and game management system using Python and UDP networking.  
