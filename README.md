@@ -20,3 +20,6 @@ It provides a GUI for player registration, team assignment, and game display scr
 Install dependencies automatically using:
 ```bash
 ./install.sh
+
+How to run:
+python3 player_entry.py
