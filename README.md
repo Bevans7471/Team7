@@ -24,6 +24,7 @@ It provides a GUI for player registration, team assignment, and game display scr
 
 Install dependencies automatically using:
 ```bash
+chmod a+x install.sh
 ./install.sh
 
 How to run:
