@@ -21,7 +21,7 @@ YELLOW = (255, 255, 0)
 # Screen dimensions
 WIDTH, HEIGHT = 1100, 700
 screen = pygame.display.set_mode((WIDTH, HEIGHT))
-pygame.display.set_caption("Photon Laser Tag - Player Entry")
+pygame.display.set_caption("Photon Laser Tag")
 
 # Fonts
 FONT = pygame.font.SysFont("arial", 24)
@@ -44,6 +44,10 @@ player_scores = {}
 equipment_teams = {}
 equipment_to_player = {}
 base_icons = {}
+
+# messages for game action box
+game_messages = []
+MAX_MESSAGES = 13
 
 
 def init_udp_sockets():
@@ -84,6 +88,11 @@ def update_player_score(player_id, points):
     player_scores[player_id] += points
     print(f"[SCORE] Player {player_id} {points:+d}, new score: {player_scores[player_id]}")
 
+def add_game_message(message):
+    global game_messages
+    game_messages.append(message)
+    if len(game_messages) > MAX_MESSAGES:
+        game_messages.pop(0)  # remove oldest message
 
 # Track last shooter for base scoring
 last_shooter_equipment = None
@@ -143,6 +152,7 @@ def handle_base_score(scoring_team, base_code):
         update_player_score(shooter_player, 100)
         base_icons[shooter_player] = base_icons.get(shooter_player, 0) + 1
         print(f"[BASE] Player {shooter_player} (equip {last_shooter_equipment}) scored on base! +100 points")
+        add_game_message(f"[BASE] Player {shooter_player} scored on base! +100 points")
     else:
         print(f"[BASE] Wrong team or unknown player for base score")
     # Award 100 points to the scoring player and add base icon
@@ -155,6 +165,15 @@ def process_hit(shooter_equip, target_equip):
 
     shooter_player = equipment_to_player.get(shooter_equip)
     target_player = equipment_to_player.get(target_equip)
+
+    # Get codenames if available
+    shooter_name = None
+    target_name = None
+    for player in red_team.get_players() + green_team.get_players():
+        if player['player_id'] == shooter_player:
+            shooter_name = player['codename']
+        if player['player_id'] == target_player:
+            target_name = player['codename']
 
     if not shooter_team or not target_team:
         print(f"[HIT] Unknown equipment: shooter={shooter_equip}, target={target_equip}")
@@ -174,11 +193,13 @@ def process_hit(shooter_equip, target_equip):
             update_player_score(target_player, -10)
 
         print(f"[HIT] FRIENDLY FIRE: {shooter_equip} hit teammate {target_equip}")
+        add_game_message(f"FRIENDLY FIRE: {shooter_name} hit {target_name}")
     else:
         # NORMAL HIT - shooter gains 10 points
         if shooter_player:
             update_player_score(shooter_player, 10)
         print(f"[HIT] {shooter_equip} hit enemy {target_equip}")
+        add_game_message(f"{shooter_name} hit {target_name}")
 
 
 # Splash screen
@@ -468,6 +489,12 @@ def play_action_display():
         pygame.draw.rect(screen, WHITE, event_rect, 3)
         event_label = FONT.render("Current Game Action", True, WHITE)
         screen.blit(event_label, (event_rect.x + (event_rect.width - event_label.get_width()) // 2, event_rect.y + 10))
+        # Event log
+        y_offset = event_rect.y + 40
+        for msg in game_messages:
+            msg_surface = SMALL_FONT.render(msg, True, WHITE)
+            screen.blit(msg_surface, (event_rect.x + 10, y_offset))
+            y_offset += 20
 
         pygame.display.flip()
         clock.tick(FPS)
