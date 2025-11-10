@@ -21,7 +21,7 @@ It provides a GUI for player registration, team assignment, and game display scr
 | `install.sh` | Installs required system and Python dependencies. |
 | `logo.jpg` | Splash image shown on startup. |
 | `audio` | Folder that contains eight .mp3 files to be randomly chosen |
-| `baseicon.jpg` |  |
+| `baseicon.jpg` | Base icon for any player hitting base |
 | `python_trafficgenerator_v2.py` | Testing tool for game/network |
 
 
