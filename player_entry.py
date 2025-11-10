@@ -13,6 +13,7 @@ from db_players import get_player, save_player
 pygame.init()
 pygame.mixer.init()
 
+# Audio
 AUDIO_DIR = os.path.join(os.path.dirname(__file__), "audio")
 COUNTDOWN_SYNC_AT = 15
 
@@ -54,6 +55,14 @@ base_icons = {}
 # messages for game action box
 game_messages = []
 MAX_MESSAGES = 13
+
+# Base icon image
+try:
+    BASE_ICON_IMG = pygame.image.load("baseicon.jpg")
+    BASE_ICON_IMG = pygame.transform.scale(BASE_ICON_IMG, (32, 18))
+except Exception as e:
+    print(f"[ERROR] Could not load baseicon.jpg: {e}")
+    BASE_ICON_IMG = None
 
 
 def init_udp_sockets():
@@ -114,16 +123,6 @@ def receive_udp_messages():
             message = data.decode('utf-8').strip()
             print(f"[UDP RX] Received: {message}")
 
-            # Check for base codes
-            if message == "53":
-                # Red base scored - award green team player who last shot
-                handle_base_score("green", 53)
-                continue
-            elif message == "43":
-                # Green base scored - award red team player who last shot
-                handle_base_score("red", 43)
-                continue
-
             # Analize hit data
             if ":" in message:
                 parts = message.split(":")
@@ -153,18 +152,35 @@ def handle_base_score(scoring_team, base_code):
     shooter_team = equipment_teams.get(last_shooter_equipment)
     shooter_player = equipment_to_player.get(last_shooter_equipment)
 
+    # Get codename of player
+    shooter_name = None
+    for player in red_team.get_players() + green_team.get_players():
+        if player['player_id'] == shooter_player:
+            shooter_name = player['codename']
+        
+
     if shooter_team == scoring_team and shooter_player:
         # Award 100 points and add base icon
         update_player_score(shooter_player, 100)
         base_icons[shooter_player] = base_icons.get(shooter_player, 0) + 1
         print(f"[BASE] Player {shooter_player} (equip {last_shooter_equipment}) scored on base! +100 points")
-        add_game_message(f"[BASE] Player {shooter_player} scored on base! +100 points")
+        add_game_message(f"{shooter_name} hit the Base")
     else:
         print(f"[BASE] Wrong team or unknown player for base score")
     # Award 100 points to the scoring player and add base icon
 
 
 def process_hit(shooter_equip, target_equip):
+    """First check if target_equip is a base, i.e, 43 or 53"""
+    if target_equip == 43:
+        handle_base_score("red", 43)
+        udp_transmit(target_equip)
+        return
+    elif target_equip == 53:
+        handle_base_score("green", 53)
+        udp_transmit(target_equip)
+        return
+
     """Process a hit between two players"""
     shooter_team = equipment_teams.get(shooter_equip)
     target_team = equipment_teams.get(target_equip)
@@ -396,7 +412,7 @@ def play_music(path, *, loops=-1, start_pos=0.0, volume=1.0):
     except Exception as e:
         print(f"[AUDIO] Failed to play {path}: {e}")
         return False
-    
+
 def pre_game_countdown():
     """Show countdown and broadcast code 202 when finished"""
     countdown = 30
@@ -483,9 +499,37 @@ def play_action_display():
     clock = pygame.time.Clock()
     running = True
 
+    flash_timer = 0
+    flash_on = True
+    FLASH_INTERVAL = 500  # milliseconds
+
+    # --- Game Timer Stuff ---
+    GAME_DURATION = 6 * 60 * 1000  # 6 minutes in milliseconds
+    game_start_time = pygame.time.get_ticks()
+
     while running:
         receive_udp_messages()
         screen.fill(BLACK)
+
+        # --- Game Timer logic ---
+        now = pygame.time.get_ticks()
+        elapsed = now - game_start_time
+        remaining = max(0, GAME_DURATION - elapsed)
+        minutes = remaining // 60000
+        seconds = (remaining % 60000) // 1000
+
+        # End game automatically when time runs out
+        if remaining == 0:
+            print("[TIMER] Game time expired - ending game")
+            for _ in range(3):
+                udp_transmit(221)
+            remaining = 0
+
+        # --- Flashing timer update ---
+        current_time = pygame.time.get_ticks()
+        if current_time - flash_timer >= FLASH_INTERVAL:
+            flash_on = not flash_on
+            flash_timer = current_time
 
         # Sort players by score (highest to lowest)
         red_sorted = sorted(red_players, key=lambda p: player_scores.get(p['player_id'], 0), reverse=True)
@@ -499,19 +543,6 @@ def play_action_display():
 
         red_team_score = sum(player_scores.get(p['player_id'], 0) for p in red_players)
         score_x_red = red_rect.x + red_rect.width - 50
-        red_score_text = FONT.render(str(red_team_score), True, RED)
-        screen.blit(red_score_text, (score_x_red - red_score_text.get_width() // 2, red_rect.y + 10))
-
-        y_offset = red_rect.y + 45
-        for player in red_sorted:
-            # Display base icons if any
-            icon_str = "⚑ " * base_icons.get(player['player_id'], 0)
-            player_text = SMALL_FONT.render(f"{icon_str}{player['codename']}", True, WHITE)
-            screen.blit(player_text, (red_rect.x + 10, y_offset))
-
-            score_text = SMALL_FONT.render(str(player_scores.get(player['player_id'], 0)), True, WHITE)
-            screen.blit(score_text, (score_x_red - score_text.get_width() // 2, y_offset))
-            y_offset += 25
 
         # Green team area
         green_rect = pygame.Rect(575, 50, 500, 280)
@@ -521,43 +552,86 @@ def play_action_display():
 
         green_team_score = sum(player_scores.get(p['player_id'], 0) for p in green_players)
         score_x_green = green_rect.x + green_rect.width - 50
-        green_score_text = FONT.render(str(green_team_score), True, GREEN)
-        screen.blit(green_score_text, (score_x_green - green_score_text.get_width() // 2, green_rect.y + 10))
 
+        # --- Determine which score should flash ---
+        if red_team_score > green_team_score:
+            draw_red_score = flash_on
+            draw_green_score = True
+        elif green_team_score > red_team_score:
+            draw_red_score = True
+            draw_green_score = flash_on
+        else:  # tie
+            draw_red_score = True
+            draw_green_score = True
+
+        # Draw team scores
+        if draw_red_score:
+            red_score_text = FONT.render(str(red_team_score), True, RED)
+            screen.blit(red_score_text, (score_x_red - red_score_text.get_width() // 2, red_rect.y + 10))
+
+        if draw_green_score:
+            green_score_text = FONT.render(str(green_team_score), True, GREEN)
+            screen.blit(green_score_text, (score_x_green - green_score_text.get_width() // 2, green_rect.y + 10))
+
+        # --- Draw red players ---
+        y_offset = red_rect.y + 45
+        for player in red_sorted:
+            x_offset = red_rect.x + 10
+            # Draw base icons
+            for _ in range(base_icons.get(player['player_id'], 0)):
+                if BASE_ICON_IMG:
+                    screen.blit(BASE_ICON_IMG, (x_offset, y_offset))
+                    x_offset += BASE_ICON_IMG.get_width() + 2
+            # Draw codename
+            player_text = SMALL_FONT.render(player['codename'], True, WHITE)
+            screen.blit(player_text, (x_offset + 5, y_offset))
+            # Draw individual score
+            score_text = SMALL_FONT.render(str(player_scores.get(player['player_id'], 0)), True, WHITE)
+            screen.blit(score_text, (score_x_red - score_text.get_width() // 2, y_offset))
+            y_offset += 25
+
+        # --- Draw green players ---
         y_offset = green_rect.y + 45
         for player in green_sorted:
-            icon_str = "⚑ " * base_icons.get(player['player_id'], 0)
-            player_text = SMALL_FONT.render(f"{icon_str}{player['codename']}", True, WHITE)
-            screen.blit(player_text, (green_rect.x + 10, y_offset))
-
+            x_offset = green_rect.x + 10
+            for _ in range(base_icons.get(player['player_id'], 0)):
+                if BASE_ICON_IMG:
+                    screen.blit(BASE_ICON_IMG, (x_offset, y_offset))
+                    x_offset += BASE_ICON_IMG.get_width() + 2
+            player_text = SMALL_FONT.render(player['codename'], True, WHITE)
+            screen.blit(player_text, (x_offset + 5, y_offset))
             score_text = SMALL_FONT.render(str(player_scores.get(player['player_id'], 0)), True, WHITE)
             screen.blit(score_text, (score_x_green - score_text.get_width() // 2, y_offset))
             y_offset += 25
 
-        # Event log area
+        # --- Event log area ---
         event_rect = pygame.Rect(25, 350, 1050, 325)
         pygame.draw.rect(screen, WHITE, event_rect, 3)
         event_label = FONT.render("Current Game Action", True, WHITE)
         screen.blit(event_label, (event_rect.x + (event_rect.width - event_label.get_width()) // 2, event_rect.y + 10))
-        # Event log
+
         y_offset = event_rect.y + 40
         for msg in game_messages:
             msg_surface = SMALL_FONT.render(msg, True, WHITE)
             screen.blit(msg_surface, (event_rect.x + 10, y_offset))
             y_offset += 20
 
+        # Draws timer on the screen
+        timer_text = FONT.render(f"Time Remaining: {minutes}:{seconds:02}", True, YELLOW)
+        screen.blit(timer_text, (event_rect.right - timer_text.get_width() - 15, event_rect.bottom - timer_text.get_height() - 10))
+
+
         pygame.display.flip()
         clock.tick(FPS)
 
+        # --- Event handling ---
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 pygame.quit()
                 sys.exit()
             elif event.type == pygame.KEYDOWN:
                 if event.key == pygame.K_F5:
-                    pygame.mixer.music.stop()
                     print("[GAME] Ending game - broadcasting 221 three times")
-                    # Broadcast code 221 three times
                     for _ in range(3):
                         udp_transmit(221)
                     running = False
@@ -619,6 +693,7 @@ def main():
                     pre_game_countdown()
                     pygame.event.clear()
                     play_action_display()
+                    pygame.mixer.music.stop()
                 elif event.key == pygame.K_F12:
                     red_team.clear()
                     green_team.clear()
